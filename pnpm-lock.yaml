@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ctrl/shared-usenet':
-        specifier: file:../shared-usenet
-        version: file:../shared-usenet(ofetch@1.5.1)
+        specifier: ^1.0.0
+        version: 1.0.0(ofetch@1.5.1)
       node-fetch-native:
         specifier: ^1.6.7
         version: 1.6.7
@@ -55,8 +55,8 @@ packages:
     resolution: {integrity: sha512-sWHlEUw86l5Q7tdZQcWRJF1Vzj1NKOn4XeMHj2+9ICDE96n2CjKgw6WSp8gITd/oBH7AHS+9e278UKSS64ZCvA==}
     engines: {node: '>=20'}
 
-  '@ctrl/shared-usenet@file:../shared-usenet':
-    resolution: {directory: ../shared-usenet, type: directory}
+  '@ctrl/shared-usenet@1.0.0':
+    resolution: {integrity: sha512-ZdSIUKSkKpUcSB5hJyhj/DcFjRvHyXFUdmqBCAdcyoyNdzEtHDVgqE3kwV41f4jPbfCt0EMSOhA77NfiYWdgqg==}
     engines: {node: '>=24'}
     peerDependencies:
       ofetch: ^1.5.0
@@ -858,7 +858,7 @@ snapshots:
 
   '@ctrl/oxlint-config@1.4.2': {}
 
-  '@ctrl/shared-usenet@file:../shared-usenet(ofetch@1.5.1)':
+  '@ctrl/shared-usenet@1.0.0(ofetch@1.5.1)':
     dependencies:
       ofetch: 1.5.1
 

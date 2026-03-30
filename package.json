@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@ctrl/shared-usenet": "^0.0.1",
+    "@ctrl/shared-usenet": "^1.0.0",
     "node-fetch-native": "^1.6.7",
     "ofetch": "^1.5.1",
     "type-fest": "^5.5.0",
