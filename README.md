@@ -4,7 +4,7 @@
 
 ### Overview
 
-Includes the normalized usenet API shared with `@ctrl/nzbget`:
+Includes the normalized usenet API shared through [@ctrl/shared-usenet](https://github.com/scttcper/shared-usenet) and also available in [@ctrl/nzbget](https://github.com/scttcper/nzbget):
 
 - [`getAllData()`](#getalldata)
 - [`getQueue()`](#getqueue)
@@ -205,3 +205,14 @@ The integration spec in [`test/integration.spec.ts`](/Users/scooper/gh/sabnzbd/t
 
 - `baseUrl` defaults to `http://127.0.0.1:8080`
 - `apiKey` is read from `/tmp/sabnzbd-local-test/sabnzbd.ini` if `TEST_SABNZBD_API_KEY` is unset
+
+### See Also
+
+- shared types - [@ctrl/shared-usenet](https://github.com/scttcper/shared-usenet)
+- torrent shared types - [@ctrl/shared-torrent](https://github.com/scttcper/shared-torrent)
+- nzbget - [@ctrl/nzbget](https://github.com/scttcper/nzbget)
+- deluge - [@ctrl/deluge](https://github.com/scttcper/deluge)
+- transmission - [@ctrl/transmission](https://github.com/scttcper/transmission)
+- qbittorrent - [@ctrl/qbittorrent](https://github.com/scttcper/qbittorrent)
+- utorrent - [@ctrl/utorrent](https://github.com/scttcper/utorrent)
+- rtorrent - [@ctrl/rtorrent](https://github.com/scttcper/rtorrent)
