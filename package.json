@@ -1,0 +1,62 @@
+{
+  "name": "@ctrl/sabnzbd",
+  "version": "0.0.0-placeholder",
+  "description": "TypeScript api wrapper for SABnzbd using ofetch",
+  "keywords": [
+    "sabnzbd",
+    "typescript"
+  ],
+  "homepage": "https://sabnzbd.ep.workers.dev",
+  "license": "MIT",
+  "author": "Scott Cooper <scttcper@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/scttcper/sabnzbd.git"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "lint": "oxfmt --check && oxlint .",
+    "lint:fix": "oxfmt && oxlint . --fix",
+    "prepare": "npm run build",
+    "build": "tsc",
+    "build:docs": "typedoc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ctrl/shared-usenet": "^0.0.1",
+    "node-fetch-native": "^1.6.7",
+    "ofetch": "^1.5.1",
+    "type-fest": "^5.5.0",
+    "ufo": "^1.6.3"
+  },
+  "devDependencies": {
+    "@ctrl/oxlint-config": "1.4.2",
+    "@sindresorhus/tsconfig": "8.1.0",
+    "@types/node": "25.5.0",
+    "oxfmt": "0.42.0",
+    "oxlint": "1.57.0",
+    "typedoc": "0.28.18",
+    "typescript": "6.0.2",
+    "vitest": "4.1.2"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ]
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

@@ -36,6 +36,8 @@ import type {
   SabHistory,
   SabHistoryQuery,
   SabPositionResponse,
+  SabPostProcessValue,
+  SabPriorityValue,
   SabQueue,
   SabQueueQuery,
   SabScriptsResponse,
@@ -63,6 +65,8 @@ const defaults: UsenetClientConfig = {
   password: '',
   timeout: 5000,
 };
+const addQueuePollAttempts = 40;
+const addQueuePollIntervalMs = 250;
 
 function toQueryStringValue(value: boolean | number | string | undefined): string | undefined {
   if (value === undefined) {
@@ -88,7 +92,7 @@ function toCommaList(
 
 function normalizePostProcess(
   value: NormalizedAddNzbOptions['postProcess'] | SabAddOptions['postProcess'] | undefined,
-): number {
+): SabPostProcessValue {
   switch (value) {
     case undefined:
     case UsenetPostProcess.default: {
@@ -107,7 +111,15 @@ function normalizePostProcess(
       return 3;
     }
     default: {
-      return Number(value);
+      if (!Number.isInteger(value)) {
+        throw new TypeError(`SAB post-process value must be an integer, received: ${value}`);
+      }
+
+      if (value < -1 || value > 3) {
+        throw new RangeError(`Unsupported SAB post-process value: ${value}`);
+      }
+
+      return value;
     }
   }
 }
@@ -135,20 +147,52 @@ function getAddedJobId(response: SabAddResponse): string {
   return id;
 }
 
-function coercePriority(priority: UsenetPriority | number | undefined): UsenetPriority {
-  if (typeof priority !== 'number') {
-    return priority ?? UsenetPriority.default;
+function coercePriority(priority: UsenetPriority | SabPriorityValue | undefined): UsenetPriority {
+  if (priority === undefined) {
+    return UsenetPriority.default;
   }
 
-  return priority <= -2
-    ? UsenetPriority.paused
-    : priority < 0
-      ? UsenetPriority.low
-      : priority === 0
-        ? UsenetPriority.normal
-        : priority === 1
-          ? UsenetPriority.high
-          : UsenetPriority.force;
+  if (typeof priority !== 'number') {
+    return priority;
+  }
+
+  if (!Number.isInteger(priority)) {
+    throw new TypeError(`SAB priority must be an integer, received: ${priority}`);
+  }
+
+  switch (priority) {
+    case -100: {
+      return UsenetPriority.default;
+    }
+    case -4: {
+      return UsenetPriority.stopped;
+    }
+    case -3: {
+      return UsenetPriority.duplicate;
+    }
+    case -2: {
+      return UsenetPriority.paused;
+    }
+    case -1: {
+      return UsenetPriority.low;
+    }
+    case 0: {
+      return UsenetPriority.normal;
+    }
+    case 1: {
+      return UsenetPriority.high;
+    }
+    case 2: {
+      return UsenetPriority.force;
+    }
+    default: {
+      throw new RangeError(`Unsupported SAB priority value: ${priority}`);
+    }
+  }
+}
+
+function isUsenetNotFoundError(error: unknown): error is UsenetNotFoundError {
+  return error instanceof UsenetNotFoundError;
 }
 
 export class Sabnzbd implements UsenetClient {
@@ -810,17 +854,25 @@ export class Sabnzbd implements UsenetClient {
         ? await this.addNzbUrl(input.url, options)
         : await this.addNzbFile(input.file, options);
 
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const queue = await this.listQueue({ nzoIds: id });
-      const job = queue.slots.find(slot => slot.nzo_id === id);
-      if (job) {
-        return normalizeSabJob(job);
+    return this.waitForQueueJob(id);
+  }
+
+  private async waitForQueueJob(id: string): Promise<NormalizedUsenetJob> {
+    for (let attempt = 0; attempt < addQueuePollAttempts; attempt++) {
+      try {
+        return await this.getQueueJob(id);
+      } catch (error) {
+        if (!isUsenetNotFoundError(error)) {
+          throw error;
+        }
       }
 
-      await sleep(250);
+      if (attempt < addQueuePollAttempts - 1) {
+        await sleep(addQueuePollIntervalMs);
+      }
     }
 
-    throw new Error('Unable to load newly added SABnzbd job');
+    throw new UsenetNotFoundError('sabnzbd', 'queueJob', id);
   }
 
   private normalizeAddOptions(options: Partial<NormalizedAddNzbOptions>): SabAddOptions {

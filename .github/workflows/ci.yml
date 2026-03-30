@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: wyvox/action-setup-pnpm@v3
+        with:
+          node-version: 24
+
+      - name: start fixture server
+        run: |
+          python3 -m http.server 8767 --directory test >/tmp/sab-fixture.log 2>&1 &
+
+      - name: start sabnzbd
+        run: |
+          docker run -d \
+            --name sabnzbd \
+            -e TZ=Etc/UTC \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            -p 8080:8080 \
+            lscr.io/linuxserver/sabnzbd:latest
+
+      - name: wait for sabnzbd
+        run: |
+          for i in {1..30}; do
+            if curl -fsS 'http://127.0.0.1:8080/api?mode=version&output=json' >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+
+      - name: read api key
+        run: |
+          for i in {1..30}; do
+            docker exec sabnzbd sh -lc "grep -m1 '^api_key' /config/sabnzbd.ini | cut -d'=' -f2 | tr -d ' '" > api-key.txt || true
+            if [ -s api-key.txt ]; then
+              break
+            fi
+            sleep 2
+          done
+          test -s api-key.txt
+          echo "TEST_SABNZBD_API_KEY=$(cat api-key.txt)" >> "$GITHUB_ENV"
+
+      - name: lint
+        run: pnpm run lint
+
+      - name: build
+        run: pnpm run build
+
+      - name: test
+        env:
+          TEST_SABNZBD_URL: http://127.0.0.1:8080
+          TEST_SABNZBD_NZB_URL: http://127.0.0.1:8767/fixtures/sample.nzb
+        run: pnpm run test

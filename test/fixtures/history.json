@@ -1,0 +1,24 @@
+{
+  "history": {
+    "slots": [
+      {
+        "status": "Completed",
+        "nzo_id": "SABnzbd_nzo_done",
+        "name": "completed.release",
+        "bytes": 1048576,
+        "category": "movies",
+        "storage": "/downloads/complete/completed.release",
+        "completed": 1711152000
+      },
+      {
+        "status": "Failed",
+        "nzo_id": "SABnzbd_nzo_failed",
+        "name": "failed.release",
+        "bytes": 2097152,
+        "category": "movies",
+        "storage": "/downloads/complete/failed.release",
+        "fail_message": "Missing articles"
+      }
+    ]
+  }
+}

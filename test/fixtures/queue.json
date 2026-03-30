@@ -1,0 +1,24 @@
+{
+  "queue": {
+    "status": "Downloading",
+    "paused": false,
+    "timeleft": "0:03:12",
+    "kbpersec": "1024.00",
+    "mbleft": "512.25",
+    "slots": [
+      {
+        "status": "Downloading",
+        "index": 0,
+        "timeleft": "0:03:12",
+        "mb": "1024.50",
+        "filename": "movie.release",
+        "priority": "1",
+        "cat": "movies",
+        "mbleft": "512.25",
+        "percentage": "50",
+        "nzo_id": "SABnzbd_nzo_123",
+        "script": "Notify.py"
+      }
+    ]
+  }
+}
