@@ -11,38 +11,37 @@ import {
   type UsenetClientConfig,
   type UsenetClientState,
   UsenetNotFoundError,
-  UsenetPostProcess,
   UsenetPriority,
 } from '@ctrl/shared-usenet';
-import { FormData } from 'node-fetch-native';
-import { ofetch } from 'ofetch';
 import type { Jsonify } from 'type-fest';
-import { joinURL } from 'ufo';
 
+import {
+  buildAddFileForm,
+  getSabAddFields,
+  normalizeAddOptions,
+  normalizeAddPostProcess,
+} from './addOptions.js';
 import {
   normalizeSabHistoryItem,
   normalizeSabJob,
   normalizeSabStatus,
   normalizedPriorityToSab,
 } from './normalizeUsenetData.js';
+import { requestSab, type SabRequestOptions, type SabRequestParams } from './sabTransport.js';
 import type {
   SabAddOptions,
   SabAddResponse,
   SabAuthResponse,
-  SabBooleanResponse,
   SabCategoriesResponse,
   SabFilesResponse,
   SabFullStatus,
   SabHistory,
   SabHistoryQuery,
   SabPositionResponse,
-  SabPostProcessValue,
-  SabPriorityValue,
   SabQueue,
   SabQueueQuery,
   SabScriptsResponse,
   SabServerStats,
-  SabSwitchResponse,
   SabVersionResponse,
   SabWarning,
   SabWarningsResponse,
@@ -90,48 +89,6 @@ function toCommaList(
   return Array.isArray(value) ? value.join(',') : `${value}`;
 }
 
-function normalizePostProcess(
-  value: NormalizedAddNzbOptions['postProcess'] | SabAddOptions['postProcess'] | undefined,
-): SabPostProcessValue {
-  switch (value) {
-    case undefined:
-    case UsenetPostProcess.default: {
-      return -1;
-    }
-    case UsenetPostProcess.none: {
-      return 0;
-    }
-    case UsenetPostProcess.repair: {
-      return 1;
-    }
-    case UsenetPostProcess.repairUnpack: {
-      return 2;
-    }
-    case UsenetPostProcess.repairUnpackDelete: {
-      return 3;
-    }
-    default: {
-      if (!Number.isInteger(value)) {
-        throw new TypeError(`SAB post-process value must be an integer, received: ${value}`);
-      }
-
-      if (value < -1 || value > 3) {
-        throw new RangeError(`Unsupported SAB post-process value: ${value}`);
-      }
-
-      return value;
-    }
-  }
-}
-
-function encodeNzbFile(file: string | Uint8Array): Uint8Array {
-  if (typeof file === 'string') {
-    return new TextEncoder().encode(file);
-  }
-
-  return file;
-}
-
 async function sleep(milliseconds: number): Promise<void> {
   await new Promise<void>(resolve => {
     setTimeout(resolve, milliseconds);
@@ -145,50 +102,6 @@ function getAddedJobId(response: SabAddResponse): string {
   }
 
   return id;
-}
-
-function coercePriority(priority: UsenetPriority | SabPriorityValue | undefined): UsenetPriority {
-  if (priority === undefined) {
-    return UsenetPriority.default;
-  }
-
-  if (typeof priority !== 'number') {
-    return priority;
-  }
-
-  if (!Number.isInteger(priority)) {
-    throw new TypeError(`SAB priority must be an integer, received: ${priority}`);
-  }
-
-  switch (priority) {
-    case -100: {
-      return UsenetPriority.default;
-    }
-    case -4: {
-      return UsenetPriority.stopped;
-    }
-    case -3: {
-      return UsenetPriority.duplicate;
-    }
-    case -2: {
-      return UsenetPriority.paused;
-    }
-    case -1: {
-      return UsenetPriority.low;
-    }
-    case 0: {
-      return UsenetPriority.normal;
-    }
-    case 1: {
-      return UsenetPriority.high;
-    }
-    case 2: {
-      return UsenetPriority.force;
-    }
-    default: {
-      throw new RangeError(`Unsupported SAB priority value: ${priority}`);
-    }
-  }
 }
 
 function isUsenetNotFoundError(error: unknown): error is UsenetNotFoundError {
@@ -365,8 +278,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the pause command.
    */
   async pauseQueue(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'pause' });
-    return true;
+    return this.command({ mode: 'pause' });
   }
 
   /**
@@ -377,8 +289,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the resume command.
    */
   async resumeQueue(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'resume' });
-    return true;
+    return this.command({ mode: 'resume' });
   }
 
   /**
@@ -389,8 +300,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the shutdown command.
    */
   async shutdown(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'shutdown' });
-    return true;
+    return this.command({ mode: 'shutdown' });
   }
 
   /**
@@ -401,8 +311,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the restart command.
    */
   async restart(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'restart' });
-    return true;
+    return this.command({ mode: 'restart' });
   }
 
   /**
@@ -413,8 +322,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the repair restart command.
    */
   async restartRepair(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'restart_repair' });
-    return true;
+    return this.command({ mode: 'restart_repair' });
   }
 
   /**
@@ -425,8 +333,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the post-processing pause command.
    */
   async pausePostProcessing(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'pause_pp' });
-    return true;
+    return this.command({ mode: 'pause_pp' });
   }
 
   /**
@@ -437,8 +344,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the post-processing resume command.
    */
   async resumePostProcessing(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'resume_pp' });
-    return true;
+    return this.command({ mode: 'resume_pp' });
   }
 
   /**
@@ -449,8 +355,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the RSS trigger command.
    */
   async fetchRss(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'rss_now' });
-    return true;
+    return this.command({ mode: 'rss_now' });
   }
 
   /**
@@ -461,8 +366,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the watched-folder scan command.
    */
   async scanWatchedFolder(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'watched_now' });
-    return true;
+    return this.command({ mode: 'watched_now' });
   }
 
   /**
@@ -473,8 +377,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the quota reset command.
    */
   async resetQuota(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'reset_quota' });
-    return true;
+    return this.command({ mode: 'reset_quota' });
   }
 
   /**
@@ -485,8 +388,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the warning clear command.
    */
   async clearWarnings(): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'warnings', name: 'clear' });
-    return true;
+    return this.command({ mode: 'warnings', name: 'clear' });
   }
 
   /**
@@ -498,8 +400,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the job pause command.
    */
   async pauseJob(id: string): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'queue', name: 'pause', value: id });
-    return true;
+    return this.command({ mode: 'queue', name: 'pause', value: id });
   }
 
   /**
@@ -511,8 +412,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the job resume command.
    */
   async resumeJob(id: string): Promise<boolean> {
-    await this.request<SabBooleanResponse>({ mode: 'queue', name: 'resume', value: id });
-    return true;
+    return this.command({ mode: 'queue', name: 'resume', value: id });
   }
 
   /**
@@ -525,13 +425,12 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the delete command.
    */
   async deleteJob(id: string, deleteFiles = false): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'queue',
       name: 'delete',
       value: id,
       del_files: deleteFiles ? '1' : '0',
     });
-    return true;
   }
 
   /**
@@ -544,12 +443,11 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the move command.
    */
   async moveJob(id: string, position: number): Promise<boolean> {
-    await this.request<SabSwitchResponse>({
+    return this.command({
       mode: 'switch',
       value: id,
       value2: `${position}`,
     });
-    return true;
   }
 
   /**
@@ -562,12 +460,11 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the category change.
    */
   async changeCategory(id: string, category: string): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'change_cat',
       value: id,
       value2: category,
     });
-    return true;
   }
 
   /**
@@ -580,12 +477,11 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the script change.
    */
   async changeScript(id: string, script: string): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'change_script',
       value: id,
       value2: script,
     });
-    return true;
   }
 
   /**
@@ -620,12 +516,11 @@ export class Sabnzbd implements UsenetClient {
     id: string,
     postProcess: NormalizedAddNzbOptions['postProcess'],
   ): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'change_opts',
       value: id,
-      value2: `${normalizePostProcess(postProcess)}`,
+      value2: `${normalizeAddPostProcess(postProcess)}`,
     });
-    return true;
   }
 
   /**
@@ -639,13 +534,12 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the rename command.
    */
   async renameJob(id: string, name: string, password = ''): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'rename',
       value: id,
       value2: name,
       password,
     });
-    return true;
   }
 
   /**
@@ -669,12 +563,11 @@ export class Sabnzbd implements UsenetClient {
    * @returns `true` when SABnzbd accepts the speed limit update.
    */
   async setSpeedLimit(limit: string | number): Promise<boolean> {
-    await this.request<SabBooleanResponse>({
+    return this.command({
       mode: 'config',
       name: 'speedlimit',
       value: `${limit}`,
     });
-    return true;
   }
 
   /**
@@ -691,12 +584,7 @@ export class Sabnzbd implements UsenetClient {
     const response = await this.request<SabAddResponse>({
       mode: 'addurl',
       name: url,
-      nzbname: options.name ?? '',
-      password: options.password ?? '',
-      cat: options.category ?? '*',
-      script: options.script ?? 'Default',
-      priority: `${options.priority ?? -100}`,
-      pp: `${options.postProcess ?? -1}`,
+      ...getSabAddFields(options),
     });
 
     return response;
@@ -713,34 +601,7 @@ export class Sabnzbd implements UsenetClient {
    * @returns The raw SAB add response containing status and optional `nzo_ids`.
    */
   async addFile(nzb: string | Uint8Array, options: SabAddOptions = {}): Promise<SabAddResponse> {
-    const form = new FormData();
-    form.append('mode', 'addfile');
-    form.append('output', 'json');
-    form.append('nzbname', options.name ?? '');
-    form.append('password', options.password ?? '');
-    form.append('cat', options.category ?? '*');
-    form.append('script', options.script ?? 'Default');
-    form.append('priority', `${options.priority ?? -100}`);
-    form.append('pp', `${options.postProcess ?? -1}`);
-
-    if (this.config.apiKey) {
-      form.append('apikey', this.config.apiKey);
-    } else if (this.config.nzbKey) {
-      form.append('nzbkey', this.config.nzbKey);
-    } else {
-      form.append('ma_username', this.config.username ?? '');
-      form.append('ma_password', this.config.password ?? '');
-    }
-
-    const filename = options.name?.endsWith('.nzb')
-      ? options.name
-      : `${options.name ?? 'upload'}.nzb`;
-    form.append(
-      'name',
-      new Blob([Buffer.from(encodeNzbFile(nzb))], { type: 'application/x-nzb+xml' }),
-      filename,
-    );
-
+    const form = buildAddFileForm(this.config, nzb, options);
     return this.request<SabAddResponse>({}, { method: 'POST', body: form });
   }
 
@@ -836,12 +697,12 @@ export class Sabnzbd implements UsenetClient {
     nzb: string | Uint8Array,
     options: Partial<NormalizedAddNzbOptions> = {},
   ): Promise<string> {
-    const response = await this.addFile(nzb, this.normalizeAddOptions(options));
+    const response = await this.addFile(nzb, normalizeAddOptions(options));
     return getAddedJobId(response);
   }
 
   async addNzbUrl(url: string, options: Partial<NormalizedAddNzbOptions> = {}): Promise<string> {
-    const response = await this.addUrl(url, this.normalizeAddOptions(options));
+    const response = await this.addUrl(url, normalizeAddOptions(options));
     return getAddedJobId(response);
   }
 
@@ -875,74 +736,12 @@ export class Sabnzbd implements UsenetClient {
     throw new UsenetNotFoundError('sabnzbd', 'queueJob', id);
   }
 
-  private normalizeAddOptions(options: Partial<NormalizedAddNzbOptions>): SabAddOptions {
-    return {
-      category: options.category ?? '*',
-      script: options.postProcessScript ?? 'Default',
-      priority: normalizedPriorityToSab(
-        options.startPaused ? UsenetPriority.paused : coercePriority(options.priority),
-      ),
-      postProcess: normalizePostProcess(options.postProcess),
-      name: options.name,
-      password: options.password,
-    };
+  private async command(params: SabRequestParams): Promise<boolean> {
+    await this.request<unknown>(params);
+    return true;
   }
 
-  private async request<T>(
-    params: Record<string, string | undefined>,
-    options: {
-      method?: 'GET' | 'POST';
-      body?: BodyInit;
-    } = {},
-  ): Promise<T> {
-    const url = joinURL(this.config.baseUrl, this.config.path ?? '/api');
-    const query =
-      options.method === 'POST'
-        ? undefined
-        : {
-            output: 'json',
-            ...this.getAuthQuery(),
-            ...params,
-          };
-
-    const response = await ofetch<T>(url, {
-      method: options.method ?? 'GET',
-      body: options.body,
-      query,
-      dispatcher: this.config.dispatcher,
-      timeout: this.config.timeout,
-    });
-
-    this.assertSabResponse(response);
-    return response;
-  }
-
-  private getAuthQuery(): Record<string, string> {
-    if (this.config.apiKey) {
-      return { apikey: this.config.apiKey };
-    }
-
-    if (this.config.nzbKey) {
-      return { nzbkey: this.config.nzbKey };
-    }
-
-    return {
-      ma_username: this.config.username ?? '',
-      ma_password: this.config.password ?? '',
-    };
-  }
-
-  private assertSabResponse(response: unknown): void {
-    if (!response || typeof response !== 'object') {
-      return;
-    }
-
-    if ('status' in response && response.status === false) {
-      const error =
-        'error' in response && typeof response.error === 'string'
-          ? response.error
-          : 'SABnzbd returned status=false';
-      throw new Error(error);
-    }
+  private async request<T>(params: SabRequestParams, options: SabRequestOptions = {}): Promise<T> {
+    return requestSab<T>(this.config, params, options);
   }
 }
