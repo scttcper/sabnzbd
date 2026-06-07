@@ -161,21 +161,33 @@ describe('lookup helpers', () => {
     const client = new Sabnzbd();
     const queue = readFixture<{ queue: SabQueue }>('queue.json').queue;
     const history = readFixture<{ history: SabHistory }>('history.json').history;
+    const queueQueries: SabQueueQuery[] = [];
+    const historyQueries: SabHistoryQuery[] = [];
 
-    client.listQueue = async () => queue;
-    client.listHistory = async () => history;
+    client.listQueue = async query => {
+      queueQueries.push(query ?? {});
+      return queue;
+    };
+    client.listHistory = async query => {
+      historyQueries.push(query ?? {});
+      return history;
+    };
 
     const queueJob = await client.getQueueJob('SABnzbd_nzo_123');
     expect(queueJob.name).toBe('movie.release');
+    expect(queueQueries).toContainEqual({ nzoIds: 'SABnzbd_nzo_123' });
 
     const historyJob = await client.getHistoryJob('SABnzbd_nzo_done');
     expect(historyJob.name).toBe('completed.release');
+    expect(historyQueries).toContainEqual({ nzoIds: 'SABnzbd_nzo_done' });
 
     const foundQueue = await client.findJob('SABnzbd_nzo_123');
     expect(foundQueue?.source).toBe('queue');
+    expect(queueQueries).toContainEqual({ nzoIds: 'SABnzbd_nzo_123' });
 
     const foundHistory = await client.findJob('SABnzbd_nzo_done');
     expect(foundHistory?.source).toBe('history');
+    expect(historyQueries).toContainEqual({ nzoIds: 'SABnzbd_nzo_done' });
 
     await expect(client.getQueueJob('missing')).rejects.toMatchObject({
       name: 'UsenetNotFoundError',

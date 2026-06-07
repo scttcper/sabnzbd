@@ -616,41 +616,37 @@ export class Sabnzbd implements UsenetClient {
   }
 
   async getQueueJob(id: string): Promise<NormalizedUsenetJob> {
-    const queue = await this.listQueue({ nzoIds: id });
-    const job = queue.slots.find(slot => slot.nzo_id === id);
+    const job = await this.findQueueJob(id);
     if (!job) {
       throw new UsenetNotFoundError('sabnzbd', 'queueJob', id);
     }
 
-    return normalizeSabJob(job);
+    return job;
   }
 
   async getHistoryJob(id: string): Promise<NormalizedUsenetHistoryItem> {
-    const history = await this.listHistory({ nzoIds: id });
-    const historyItem = history.slots.find(item => item.nzo_id === id);
+    const historyItem = await this.findHistoryJob(id);
     if (!historyItem) {
       throw new UsenetNotFoundError('sabnzbd', 'historyJob', id);
     }
 
-    return normalizeSabHistoryItem(historyItem);
+    return historyItem;
   }
 
   async findJob(id: string): Promise<FoundUsenetJob | null> {
-    const queue = await this.listQueue({ nzoIds: id });
-    const queueJob = queue.slots.find(slot => slot.nzo_id === id);
+    const queueJob = await this.findQueueJob(id);
     if (queueJob) {
       return {
         source: 'queue',
-        job: normalizeSabJob(queueJob),
+        job: queueJob,
       };
     }
 
-    const history = await this.listHistory({ nzoIds: id });
-    const historyJob = history.slots.find(item => item.nzo_id === id);
+    const historyJob = await this.findHistoryJob(id);
     if (historyJob) {
       return {
         source: 'history',
-        job: normalizeSabHistoryItem(historyJob),
+        job: historyJob,
       };
     }
 
@@ -734,6 +730,18 @@ export class Sabnzbd implements UsenetClient {
     }
 
     throw new UsenetNotFoundError('sabnzbd', 'queueJob', id);
+  }
+
+  private async findQueueJob(id: string): Promise<NormalizedUsenetJob | undefined> {
+    const queue = await this.listQueue({ nzoIds: id });
+    const slot = queue.slots.find(item => item.nzo_id === id);
+    return slot ? normalizeSabJob(slot) : undefined;
+  }
+
+  private async findHistoryJob(id: string): Promise<NormalizedUsenetHistoryItem | undefined> {
+    const history = await this.listHistory({ nzoIds: id });
+    const item = history.slots.find(slot => slot.nzo_id === id);
+    return item ? normalizeSabHistoryItem(item) : undefined;
   }
 
   private async command(params: SabRequestParams): Promise<boolean> {

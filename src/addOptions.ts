@@ -10,7 +10,14 @@ import { normalizedPriorityToSab } from './normalizeUsenetData.js';
 import { appendSabAuthFields } from './sabTransport.js';
 import type { SabAddOptions, SabPostProcessValue, SabPriorityValue } from './types.js';
 
-type SabAddFields = Record<string, string>;
+interface SabAddFields {
+  nzbname: string;
+  password: string;
+  cat: string;
+  script: string;
+  priority: string;
+  pp: string;
+}
 
 interface ResolvedSabAddOptions {
   category: string;
@@ -172,12 +179,12 @@ export function buildAddFileForm(
   nzb: string | Uint8Array,
   options: SabAddOptions,
 ): FormData {
-  const resolved = resolveSabAddOptions(options);
+  const fields = getSabAddFields(options);
   const form = new FormData();
   form.append('mode', 'addfile');
   form.append('output', 'json');
 
-  for (const [name, value] of Object.entries(getSabAddFields(options))) {
+  for (const [name, value] of Object.entries(fields)) {
     form.append(name, value);
   }
 
@@ -186,7 +193,7 @@ export function buildAddFileForm(
   form.append(
     'name',
     new Blob([Buffer.from(encodeNzbFile(nzb))], { type: 'application/x-nzb+xml' }),
-    getUploadFilename(resolved.name),
+    getUploadFilename(fields.nzbname),
   );
 
   return form;
