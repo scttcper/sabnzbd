@@ -50,7 +50,7 @@
     "oxlint": "1.57.0",
     "typedoc": "0.28.18",
     "typescript": "6.0.2",
-    "vitest": "4.1.2"
+    "vitest": "4.1.11"
   },
   "release": {
     "branches": [
