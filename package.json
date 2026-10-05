@@ -31,7 +31,7 @@
     "lint:fix": "oxfmt && oxlint . --fix",
     "prepare": "npm run build",
     "build": "tsc",
-    "build:docs": "typedoc",
+    "build:docs": "node --import ./typedoc.mjs ./node_modules/typedoc/bin/typedoc",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -39,18 +39,19 @@
     "@ctrl/shared-usenet": "^1.0.0",
     "node-fetch-native": "^1.6.7",
     "ofetch": "^1.5.1",
-    "type-fest": "^5.5.0",
-    "ufo": "^1.6.3"
+    "type-fest": "^5.10.0",
+    "ufo": "^1.6.4"
   },
   "devDependencies": {
-    "@ctrl/oxlint-config": "1.4.2",
+    "@ctrl/oxlint-config": "1.5.0",
     "@sindresorhus/tsconfig": "8.1.0",
-    "@types/node": "25.5.0",
-    "oxfmt": "0.42.0",
-    "oxlint": "1.57.0",
-    "typedoc": "0.28.18",
-    "typescript": "6.0.2",
-    "vitest": "4.1.2"
+    "@types/node": "26.6.4",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
+    "typedoc": "0.28.20",
+    "typescript": "7.0.2",
+    "typescript6": "npm:typescript@6.0.3",
+    "vitest": "5.0.3"
   },
   "release": {
     "branches": [
@@ -60,5 +61,5 @@
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@10.33.0"
+  "packageManager": "pnpm@12.9.1"
 }
