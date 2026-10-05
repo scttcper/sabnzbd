@@ -216,3 +216,4 @@ The integration spec in [`test/integration.spec.ts`](/Users/scooper/gh/sabnzbd/t
 - qbittorrent - [@ctrl/qbittorrent](https://github.com/scttcper/qbittorrent)
 - utorrent - [@ctrl/utorrent](https://github.com/scttcper/utorrent)
 - rtorrent - [@ctrl/rtorrent](https://github.com/scttcper/rtorrent)
+- rqbit - [@ctrl/rqbit](https://github.com/scttcper/rqbit)
