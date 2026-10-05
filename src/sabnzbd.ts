@@ -269,8 +269,9 @@ export class Sabnzbd implements UsenetClient {
    */
   async getCategories(): Promise<Category[]> {
     const response = await this.request<SabCategoriesResponse>({ mode: 'get_cats' });
+    // `*` is SAB's default category, normalized jobs report it as an empty category
     return response.categories.map(category => ({
-      id: category,
+      id: category === '*' ? '' : category,
       name: category,
     }));
   }

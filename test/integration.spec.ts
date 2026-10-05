@@ -270,6 +270,8 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     const categories = await client.getCategories();
 
     expect(Array.isArray(categories)).toBe(true);
+    // the default category matches the empty category on normalized jobs
+    expect(categories).toContainEqual({ id: '', name: '*' });
   });
 
   it('loads scripts payload shape', async () => {
