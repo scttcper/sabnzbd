@@ -25,7 +25,7 @@ Use the normalized methods by default. Drop to the native SABnzbd methods only w
 npm install @ctrl/sabnzbd
 ```
 
-Requires Node.js 22 or newer.
+Requires Node.js 24 or newer.
 
 ### Use
 
