@@ -46,7 +46,7 @@ describe('normalizeSabJob', () => {
 
     expect(job.id).toBe('SABnzbd_nzo_123');
     expect(job.category).toBe('movies');
-    expect(job.progress).toBe(50);
+    expect(job.progress).toBe(0.5);
     expect(job.stateMessage).toBe('Downloading');
     expect(job.postProcessScript).toBe('Notify.py');
     expect(job.priority).toBe(UsenetPriority.high);
@@ -87,7 +87,7 @@ describe('normalizeSabHistoryItem', () => {
     const [completed, failed, postProcessing] = history.slots.map(normalizeSabHistoryItem);
 
     expect(completed?.succeeded).toBe(true);
-    expect(completed?.progress).toBe(100);
+    expect(completed?.progress).toBe(1);
     expect(completed?.stateMessage).toBe('Completed');
     expect(completed?.category).toBe('movies');
     expect(completed?.dateAdded).toBe('2024-03-22T23:26:40.000Z');

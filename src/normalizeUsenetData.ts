@@ -248,19 +248,22 @@ export function normalizeSabJob(slot: SabQueueSlot): NormalizedUsenetJob {
   const { state, stateMessage } = mapSabStatus(slot.status);
   const totalSize = megabytesToBytes(slot.mb);
   const remainingSize = megabytesToBytes(slot.mbleft);
-  const progress = toNumber(slot.percentage);
+  const progress = toNumber(slot.percentage) / 100;
+  const isCompleted = progress >= 1;
+  // SAB reports 0:00:00 when it has no estimate
+  const eta = parseSabDuration(slot.timeleft);
 
   return {
     id: slot.nzo_id,
     name: slot.filename,
     progress,
-    isCompleted: progress >= 100,
+    isCompleted,
     category: normalizeSabName(slot.cat) ?? '',
     priority: sabPriorityToNormalized(slot.priority),
     state,
     stateMessage,
     downloadSpeed: 0,
-    eta: parseSabDuration(slot.timeleft),
+    eta: isCompleted ? 0 : eta > 0 ? eta : -1,
     queuePosition: slot.index,
     totalSize,
     remainingSize,
@@ -281,7 +284,7 @@ export function normalizeSabHistoryItem(item: SabHistorySlot): NormalizedUsenetH
   return {
     id: item.nzo_id,
     name: item.name || item.nzb_name || item.nzo_id,
-    progress: succeeded ? 100 : 0,
+    progress: succeeded ? 1 : 0,
     isCompleted: succeeded,
     category: normalizeSabName(item.category) ?? '',
     priority: undefined,
