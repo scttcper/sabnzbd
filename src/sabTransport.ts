@@ -7,6 +7,11 @@ export type SabRequestParams = Record<string, string | undefined>;
 export interface SabRequestOptions {
   method?: 'GET' | 'POST';
   body?: BodyInit;
+  /**
+   * Return `status: false` responses without an `error` instead of throwing, for endpoints
+   * that use it to report "nothing matched".
+   */
+  allowFalseStatus?: boolean;
 }
 
 export function getSabAuthParams(config: Readonly<UsenetClientConfig>): Record<string, string> {
@@ -33,17 +38,16 @@ export function appendSabAuthFields(
   }
 }
 
-export function assertSabResponse(response: unknown): void {
+export function assertSabResponse(response: unknown, allowFalseStatus = false): void {
   if (!response || typeof response !== 'object') {
     return;
   }
 
   if ('status' in response && response.status === false) {
-    const error =
-      'error' in response && typeof response.error === 'string'
-        ? response.error
-        : 'SABnzbd returned status=false';
-    throw new Error(error);
+    const error = 'error' in response && typeof response.error === 'string' ? response.error : '';
+    if (error || !allowFalseStatus) {
+      throw new Error(error || 'SABnzbd returned status=false');
+    }
   }
 }
 
@@ -70,6 +74,6 @@ export async function requestSab<T>(
     timeout: config.timeout,
   });
 
-  assertSabResponse(response);
+  assertSabResponse(response, options.allowFalseStatus);
   return response;
 }

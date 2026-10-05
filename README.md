@@ -25,6 +25,8 @@ Use the normalized methods by default. Drop to the native SABnzbd methods only w
 npm install @ctrl/sabnzbd
 ```
 
+Requires Node.js 24 or newer.
+
 ### Use
 
 ```ts
@@ -72,7 +74,7 @@ async function main() {
 ### API
 
 Docs: https://sabnzbd.ep.workers.dev  
-SABnzbd API Docs: https://sabnzbd.org/wiki/configuration/4.5/api
+SABnzbd API Docs: https://sabnzbd.org/wiki/configuration/5.1/api
 
 ### Normalized Methods
 
@@ -135,6 +137,13 @@ Connection and discovery:
 Queue and job mutation:
 
 - `deleteJob(id, deleteFiles?)`
+- `deleteHistory(id, deleteFiles?, archive?)`
+- `purgeQueue(search?)`
+- `sortQueue(sort, direction?)`
+- `pauseQueueFor(minutes)`
+- `retryJob(id, password?)`
+- `retryAll()`
+- `cancelPostProcessing(id)`
 - `shutdown()`
 - `restart()`
 - `restartRepair()`
@@ -201,7 +210,7 @@ TEST_SABNZBD_API_KEY=$(docker exec sabnzbd-local-test sed -n 's/^api_key = //p' 
 pnpm test
 ```
 
-The integration spec in [`test/integration.spec.ts`](/Users/scooper/gh/sabnzbd/test/integration.spec.ts) defaults to this exact setup:
+The integration spec in [`test/integration.spec.ts`](test/integration.spec.ts) defaults to this exact setup:
 
 - `baseUrl` defaults to `http://127.0.0.1:8080`
 - `apiKey` is read from `/tmp/sabnzbd-local-test/sabnzbd.ini` if `TEST_SABNZBD_API_KEY` is unset

@@ -6,6 +6,8 @@ import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
   Sabnzbd,
+  UsenetPostProcess,
+  UsenetPriority,
   normalizeSabHistoryItem,
   normalizeSabJob,
   normalizeSabStatus,
@@ -44,36 +46,74 @@ describe('normalizeSabJob', () => {
 
     expect(job.id).toBe('SABnzbd_nzo_123');
     expect(job.category).toBe('movies');
-    expect(job.progress).toBe(50);
+    expect(job.progress).toBe(0.5);
     expect(job.stateMessage).toBe('Downloading');
     expect(job.postProcessScript).toBe('Notify.py');
+    expect(job.priority).toBe(UsenetPriority.high);
+    expect(job.dateAdded).toBe('2024-03-22T23:26:40.000Z');
+    expect(job.eta).toBe(192);
     expect(job.totalSize).toBeGreaterThan(job.remainingSize);
+  });
+
+  it('maps SAB default sentinels and numeric priority fallback', () => {
+    const queue = readFixture<{ queue: SabQueue }>('queue.json').queue;
+    const job = normalizeSabJob(queue.slots[1]!);
+
+    expect(job.category).toBe('');
+    expect(job.postProcessScript).toBeUndefined();
+    expect(job.priority).toBe(UsenetPriority.normal);
+    expect(job.eta).toBe(86_400 + 2 * 3600 + 3 * 60 + 4);
+  });
+
+  it('maps SAB priority names', () => {
+    const queue = readFixture<{ queue: SabQueue }>('queue.json').queue;
+    const priorities = (['Force', 'Repair', 'High', 'Normal', 'Low'] as const).map(
+      priority => normalizeSabJob({ ...queue.slots[0]!, priority }).priority,
+    );
+
+    expect(priorities).toEqual([
+      UsenetPriority.force,
+      UsenetPriority.force,
+      UsenetPriority.high,
+      UsenetPriority.normal,
+      UsenetPriority.low,
+    ]);
   });
 });
 
 describe('normalizeSabHistoryItem', () => {
   it('normalizes completed and failed history', () => {
     const history = readFixture<{ history: SabHistory }>('history.json').history;
-    const [completed, failed] = history.slots.map(normalizeSabHistoryItem);
+    const [completed, failed, postProcessing] = history.slots.map(normalizeSabHistoryItem);
 
     expect(completed?.succeeded).toBe(true);
-    expect(completed?.progress).toBe(100);
+    expect(completed?.progress).toBe(1);
     expect(completed?.stateMessage).toBe('Completed');
+    expect(completed?.category).toBe('movies');
+    expect(completed?.dateAdded).toBe('2024-03-22T23:26:40.000Z');
+    expect(completed?.dateCompleted).toBe('2024-03-23T00:00:00.000Z');
     expect(failed?.succeeded).toBe(false);
     expect(failed?.stateMessage).toBe('Failed');
     expect(failed?.failureMessage).toContain('Missing');
+    expect(failed?.category).toBe('');
+    expect(failed?.postProcessScript).toBeUndefined();
+    expect(failed?.dateCompleted).toBe('2024-03-23T00:16:40.000Z');
+    expect(postProcessing?.stateMessage).toBe('Post-processing');
+    expect(postProcessing?.dateAdded).toBe('2024-03-23T00:50:00.000Z');
+    expect(postProcessing?.dateCompleted).toBeUndefined();
   });
 });
 
 describe('normalizeSabStatus', () => {
   it('normalizes queue summary and full status', () => {
     const queue = readFixture<{ queue: SabQueue }>('queue.json').queue;
-    const fullStatus = readFixture<SabFullStatus>('fullstatus.json');
+    const fullStatus = readFixture<{ status: SabFullStatus }>('fullstatus.json').status;
     const status = normalizeSabStatus(queue, fullStatus);
 
     expect(status.isDownloadPaused).toBe(false);
     expect(status.speedBytesPerSecond).toBe(1024 * 1024);
-    expect(status.completeDir).toBe('/downloads/complete');
+    expect(status.speedLimitBytesPerSecond).toBe(5 * 1024 * 1024);
+    expect(status.completeDir).toBe('/config/Downloads/complete');
   });
 });
 
@@ -122,24 +162,23 @@ describe('lookup helpers', () => {
       number | string | undefined
     >();
     expectTypeOf<SabFullStatus['servers']>().toEqualTypeOf<
-      | Array<{
-          servername: string;
-          servertotalconn: number;
-          serverssl: number;
-          serveractiveconn: number;
-          serveroptional: number;
-          serveractive: boolean;
-          servererror: string;
-          serverpriority: number;
-          serverbps: string;
-          serverconnections: Array<{
-            thrdnum: number;
-            nzo_name?: string;
-            nzf_name?: string;
-            art_name?: string;
-          }>;
-        }>
-      | undefined
+      Array<{
+        servername: string;
+        servertotalconn: number;
+        serverssl: number;
+        serveractiveconn: number;
+        serveroptional: number;
+        serveractive: boolean;
+        servererror: string;
+        serverpriority: number;
+        serverbps: string;
+        serverconnections: Array<{
+          thrdnum: number;
+          nzo_name?: string;
+          nzf_name?: string;
+          art_name?: string;
+        }>;
+      }>
     >();
     expectTypeOf<SabServerStats['servers']>().toEqualTypeOf<
       Record<
@@ -269,6 +308,14 @@ describe('lookup helpers', () => {
     // @ts-expect-error Runtime validation for untyped callers.
     const call = client.addNzbUrl('https://example.test/test.nzb', { postProcess: 9 });
     await expect(call).rejects.toThrow('Unsupported SAB post-process value: 9');
+  });
+
+  it('rejects resetting post process to default', async () => {
+    const client = new Sabnzbd();
+
+    await expect(
+      client.changePostProcess('SABnzbd_nzo_123', UsenetPostProcess.default),
+    ).rejects.toThrow(RangeError);
   });
 
   it('propagates non-not-found errors from normalizedAddNzb lookup', async () => {

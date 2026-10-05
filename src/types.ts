@@ -163,6 +163,48 @@ export interface SabSwitchResponse {
   };
 }
 
+/**
+ * Response from `mode=queue&name=delete` and `mode=queue&name=purge`.
+ *
+ * `status` is `false` when nothing was removed.
+ */
+export interface SabRemoveResponse {
+  status: boolean;
+  /**
+   * Removed queue ids.
+   */
+  nzo_ids: string[];
+}
+
+/**
+ * Re-queued job id from a retry. URL fetch retries return the `add_url` result tuple
+ * (`["OK", [nzo_id]]`) instead of a plain id.
+ *
+ * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py (`retry_job`)
+ */
+export type SabRetriedJobId = string | [string, string[]];
+
+export interface SabRetryResponse {
+  status: boolean;
+  nzo_id: SabRetriedJobId;
+}
+
+export interface SabRetryAllResponse {
+  /**
+   * One entry per retryable job, `null` when SAB could not re-queue it.
+   */
+  status: Array<SabRetriedJobId | null>;
+}
+
+/**
+ * Fields accepted by `mode=queue&name=sort`.
+ *
+ * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/nzbqueue.py (`sort_queue`)
+ */
+export type SabQueueSortField = 'name' | 'size' | 'avg_age' | 'remaining' | 'remaining_bytes';
+
+export type SabSortDirection = 'asc' | 'desc';
+
 export interface SabPositionResponse {
   /**
    * Queue position returned by priority updates, when provided by SAB.
@@ -190,6 +232,21 @@ export interface SabStatusServer {
   serverconnections: SabStatusConnection[];
 }
 
+/**
+ * Priority names SABnzbd reports on queue slots.
+ *
+ * Paused/stopped/duplicate priorities are not in SAB's interface map and fall back to the
+ * numeric `0` (normal).
+ *
+ * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/constants.py (`INTERFACE_PRIORITIES`)
+ */
+export type SabQueuePriorityName = 'Force' | 'Repair' | 'High' | 'Normal' | 'Low';
+
+/**
+ * Overall queue state reported by `mode=queue`.
+ */
+export type SabQueueState = LiteralUnion<'Idle' | 'Paused' | 'Downloading', string>;
+
 export interface SabQueueSlot {
   status: SabRawStatus;
   index: number;
@@ -197,99 +254,225 @@ export interface SabQueueSlot {
   /**
    * Total size in MB.
    */
-  mb: string | number;
-  filename: string;
-  priority: SabRawPriorityValue;
-  cat: string;
+  mb: string;
   /**
    * Remaining size in MB.
    */
-  mbleft: string | number;
-  percentage: string | number;
+  mbleft: string;
+  /**
+   * Missing size in MB.
+   */
+  mbmissing: string;
+  /**
+   * Human-readable total size, e.g. `"100 B"`.
+   */
+  size: string;
+  /**
+   * Human-readable remaining size.
+   */
+  sizeleft: string;
+  filename: string;
+  /**
+   * Priority name, or the numeric `0` fallback for priorities SAB has no name for.
+   */
+  priority: LiteralUnion<SabQueuePriorityName, string> | number;
+  /**
+   * Category name, `"*"` for the default category or `"None"` when unset.
+   */
+  cat: string;
+  percentage: string;
   nzo_id: string;
   /**
-   * Optional UNIX timestamp when the job was added.
+   * UNIX timestamp (seconds) when the job was added.
    */
-  time_added?: number | string;
-  script?: string;
+  time_added: number;
   /**
-   * Optional labels such as duplicate or propagation indicators.
+   * Script name, `"None"` when unset.
    */
-  labels?: string[];
+  script: string;
   /**
-   * Post-processing setting for the job.
+   * Labels such as duplicate or propagation indicators.
    */
-  pp?: SabRawPostProcessValue;
+  labels: string[];
+  password: string;
   /**
-   * Post-processing options value.
+   * Post-processing option (`"0"`-`"3"`).
    */
-  unpackopts?: string;
+  unpackopts: string;
+  /**
+   * Direct unpack progress, `null` when not active.
+   */
+  direct_unpack: string | null;
+  /**
+   * Average article age, e.g. `"926d"`, or `"-"` when unknown.
+   */
+  avg_age: string;
 }
 
-export interface SabQueue {
-  status: SabRawStatus;
+/**
+ * Shared header fields SABnzbd includes in both `mode=queue` and `mode=fullstatus`.
+ *
+ * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py (`build_header`)
+ */
+export interface SabStatusHeader {
+  version: string;
   paused: boolean;
+  /**
+   * Remaining timed pause (`"4:59"`), `"0"` when not paused for an interval.
+   */
+  pause_int: string;
+  paused_all: boolean;
+  /**
+   * Free space in GB for the download folder.
+   */
+  diskspace1: string;
+  /**
+   * Free space in GB for the complete folder.
+   */
+  diskspace2: string;
+  diskspace1_norm: string;
+  diskspace2_norm: string;
+  /**
+   * Total space in GB for the download folder.
+   */
+  diskspacetotal1: string;
+  /**
+   * Total space in GB for the complete folder.
+   */
+  diskspacetotal2: string;
+  /**
+   * Speed limit as a percentage of the configured maximum line speed.
+   */
+  speedlimit: string;
+  /**
+   * Absolute speed limit in bytes per second, `"0"` when unlimited.
+   */
+  speedlimit_abs: string;
+  have_warnings: string;
+  /**
+   * Action to run when the queue finishes, `null` when none.
+   */
+  finishaction: string | null;
+  quota: string;
+  have_quota: boolean;
+  left_quota: string;
+  cache_art: string;
+  cache_size: string;
+}
+
+export interface SabQueue extends SabStatusHeader {
+  status: SabQueueState;
   timeleft: string;
   /**
    * Current speed display value.
    */
-  speed?: string;
-  kbpersec?: string | number;
-  mb?: string | number;
-  mbleft?: string | number;
+  speed: string;
+  kbpersec: string;
+  mb: string;
+  mbleft: string;
+  size: string;
+  sizeleft: string;
   /**
-   * Number of jobs in the current response.
+   * Number of jobs matching the current filters.
    */
-  noofslots?: string | number;
+  noofslots: number;
   /**
    * Total number of queue jobs.
    */
-  noofslots_total?: string | number;
+  noofslots_total: number;
   /**
    * Start index used for paged queue responses.
    */
-  start?: string | number;
+  start: number;
   /**
    * Limit used for paged queue responses.
    */
-  limit?: string | number;
-  /**
-   * Speed limit percentage configured by SAB.
-   */
-  speedlimit?: string | number;
-  /**
-   * Absolute speed limit in bytes per second.
-   */
-  speedlimit_abs?: string | number;
+  limit: number;
+  finish: number;
   slots: SabQueueSlot[];
   [key: string]: unknown;
 }
 
+export interface SabHistoryStage {
+  name: string;
+  actions: string[];
+}
+
 export interface SabHistorySlot {
-  fail_message?: string;
-  bytes: string | number;
-  category?: string;
-  nzb_name?: string;
-  download_time?: string | number;
-  storage?: string;
-  completed?: string | number;
+  fail_message: string;
+  bytes: number;
   /**
-   * UNIX timestamp when the job was added.
+   * Human-readable size.
    */
-  time_added?: string | number;
+  size: string;
+  /**
+   * Bytes downloaded.
+   */
+  downloaded: number;
+  /**
+   * Category name, `"*"` for the default category.
+   */
+  category: string;
+  nzb_name: string;
+  /**
+   * Download time in seconds.
+   */
+  download_time: number;
+  /**
+   * Post-processing time in seconds.
+   */
+  postproc_time: number;
+  storage: string;
+  /**
+   * UNIX timestamp (seconds). For jobs still post-processing this is the current time.
+   */
+  completed: number;
+  /**
+   * UNIX timestamp (seconds) when the job was added.
+   */
+  time_added: number;
   /**
    * Duplicate matching key generated by SAB.
    */
-  duplicate_key?: string;
-  script?: string;
+  duplicate_key: string;
   /**
-   * History post-processing status code (`R`, `U`, `D`).
+   * Script name, `"None"` when unset.
    */
-  pp?: SabHistoryPostProcessValue;
+  script: string;
+  script_line: string;
+  /**
+   * History post-processing status code, empty when none.
+   */
+  pp: SabHistoryPostProcessValue | '';
   /**
    * Temporary destination path.
    */
-  path?: string;
+  path: string;
+  /**
+   * `"future"` for URL fetches.
+   */
+  report: string;
+  url: string;
+  url_info: string;
+  stage_log: SabHistoryStage[];
+  completeness: number | null;
+  meta: string | null;
+  series: string | null;
+  md5sum: string | null;
+  password: string | null;
+  /**
+   * Current post-processing action, only set for jobs still post-processing.
+   */
+  action_line: string;
+  /**
+   * Whether the job is actively being post-processed.
+   */
+  loaded: boolean;
+  /**
+   * Whether SAB can retry the job.
+   */
+  retry: boolean;
+  archive: boolean;
   status: SabRawStatus;
   nzo_id: string;
   name: string;
@@ -298,58 +481,94 @@ export interface SabHistorySlot {
 
 export interface SabHistory {
   /**
-   * Bytes downloaded in the current day.
+   * Human-readable total downloaded size.
    */
-  day?: string | number;
-  /**
-   * Bytes downloaded in the current week.
-   */
-  week?: string | number;
-  /**
-   * Bytes downloaded in the current month.
-   */
-  month?: string | number;
-  /**
-   * Total bytes downloaded.
-   */
-  total?: string | number;
+  total_size: string;
+  month_size: string;
+  week_size: string;
+  day_size: string;
   slots: SabHistorySlot[];
+  /**
+   * Number of returned jobs still in post-processing.
+   */
+  ppslots: number;
+  /**
+   * Total number of history jobs matching the filters.
+   */
+  noofslots: number;
+  /**
+   * Pass back as `lastHistoryUpdate` to skip unchanged history.
+   */
+  last_history_update: number;
+  version: string;
   [key: string]: unknown;
 }
 
-export interface SabFullStatus {
+export interface SabFullStatus extends SabStatusHeader {
+  /**
+   * Only present when not using `skip_dashboard`.
+   */
   localipv4?: string;
   ipv6?: string | null;
   publicipv4?: string | null;
-  dnslookup?: string;
-  folders?: string[];
-  cpumodel?: string;
-  pystone?: number;
-  loadavg?: string;
-  downloaddir?: string;
-  downloaddirspeed?: number;
-  completedir?: string;
-  completedirspeed?: number;
-  loglevel?: string;
-  logfile?: string;
-  configfn?: string;
+  dnslookup?: boolean;
+  active_socks5_proxy?: string | null;
+  folders: string[];
+  pystone: number;
+  loadavg: string;
+  downloaddir: string;
+  downloaddirspeed: number;
+  completedir: string;
+  completedirspeed: number;
+  internetbandwidth: number;
+  delayed_assembler: number;
+  loglevel: string;
+  logfile: string;
+  configfn: string;
+  /**
+   * @deprecated Not returned by current SABnzbd releases, use `windows`.
+   */
   nt?: boolean;
+  /**
+   * @deprecated Not returned by current SABnzbd releases, use `macos`.
+   */
   darwin?: boolean;
-  confighelpuri?: string;
-  uptime?: string;
-  color_scheme?: string;
-  webdir?: string;
-  active_lang?: string;
+  /**
+   * @deprecated Not returned by current SABnzbd releases.
+   */
+  cpumodel?: string;
+  windows: boolean;
+  macos: boolean;
+  rtl: boolean;
+  my_lcldata: string;
+  my_home: string;
+  url_base: string;
+  apikey: string;
+  cache_buster: string;
+  confighelpuri: string;
+  uptime: string;
+  color_scheme: string;
+  webdir: string;
+  active_lang: string;
+  /**
+   * @deprecated Not returned by current SABnzbd releases.
+   */
   restart_req?: boolean;
-  power_options?: boolean;
-  pp_pause_event?: boolean;
-  pid?: number;
-  weblogfile?: string | null;
-  new_release?: boolean;
-  new_rel_url?: string | null;
-  have_warnings?: boolean | number | string;
-  warnings?: SabWarning[];
-  servers?: SabStatusServer[];
+  power_options: boolean;
+  /**
+   * Whether a scheduled post-processing pause/resume exists. This is not the current
+   * post-processing pause state, which SABnzbd does not expose.
+   */
+  pp_pause_event: boolean;
+  pid: number;
+  weblogfile: string | null;
+  /**
+   * Newer release version, `null` when up to date.
+   */
+  new_release: string | null;
+  new_rel_url: string | null;
+  warnings: SabWarning[];
+  servers: SabStatusServer[];
   [key: string]: unknown;
 }
 
