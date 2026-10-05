@@ -248,6 +248,10 @@ export type SabQueuePriorityName = 'Force' | 'Repair' | 'High' | 'Normal' | 'Low
 export type SabQueueState = LiteralUnion<'Idle' | 'Paused' | 'Downloading', string>;
 
 export interface SabQueueSlot {
+  /**
+   * @deprecated not returned by SABnzbd queue slots, use `unpackopts`
+   */
+  pp?: SabRawPostProcessValue;
   status: SabRawStatus;
   index: number;
   timeleft: string;
@@ -480,6 +484,22 @@ export interface SabHistorySlot {
 }
 
 export interface SabHistory {
+  /**
+   * @deprecated never returned, use `day_size`
+   */
+  day?: string | number;
+  /**
+   * @deprecated never returned, use `week_size`
+   */
+  week?: string | number;
+  /**
+   * @deprecated never returned, use `month_size`
+   */
+  month?: string | number;
+  /**
+   * @deprecated never returned, use `total_size`
+   */
+  total?: string | number;
   /**
    * Human-readable total downloaded size.
    */
