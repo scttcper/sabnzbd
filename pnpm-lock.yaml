@@ -167,8 +167,8 @@ importers:
   .:
     dependencies:
       '@ctrl/shared-usenet':
-        specifier: ^1.0.0
-        version: 1.0.0(ofetch@1.5.1)
+        specifier: ^1.0.2
+        version: 1.0.2(ofetch@1.5.1)
       node-fetch-native:
         specifier: ^1.6.7
         version: 1.6.7
@@ -216,8 +216,8 @@ packages:
     resolution: {integrity: sha512-V025iYzoB+VqZEKkQR+lIjXj+uCV9g3H1ySPH1SBsD6o/dGGv0wWUldp/OpnjK4s1m5ZNXsV3rct6KBl0K6Smg==}
     engines: {node: '>=20'}
 
-  '@ctrl/shared-usenet@1.0.0':
-    resolution: {integrity: sha512-ZdSIUKSkKpUcSB5hJyhj/DcFjRvHyXFUdmqBCAdcyoyNdzEtHDVgqE3kwV41f4jPbfCt0EMSOhA77NfiYWdgqg==}
+  '@ctrl/shared-usenet@1.0.2':
+    resolution: {integrity: sha512-5/9DUaDwPO9dXtYXLYIkKa53j9g6H+N1+3moMZ6LlKP1OpeLYZ0hcYtBB+IAfjoZHsmU/3d1WYIwRmZuWkPazQ==}
     engines: {node: '>=24'}
     peerDependencies:
       ofetch: ^1.5.0
@@ -1143,7 +1143,7 @@ snapshots:
 
   '@ctrl/oxlint-config@1.5.0': {}
 
-  '@ctrl/shared-usenet@1.0.0(ofetch@1.5.1)':
+  '@ctrl/shared-usenet@1.0.2(ofetch@1.5.1)':
     dependencies:
       ofetch: 1.5.1
 
