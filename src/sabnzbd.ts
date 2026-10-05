@@ -40,7 +40,13 @@ import type {
   SabPositionResponse,
   SabQueue,
   SabQueueQuery,
+  SabQueueSortField,
+  SabRemoveResponse,
+  SabRetriedJobId,
+  SabRetryAllResponse,
+  SabRetryResponse,
   SabScriptsResponse,
+  SabSortDirection,
   SabServerStats,
   SabVersionResponse,
   SabWarning,
@@ -102,6 +108,13 @@ function getAddedJobId(response: SabAddResponse): string {
   }
 
   return id;
+}
+
+/**
+ * URL fetch retries return the `add_url` result tuple instead of a plain id.
+ */
+function getRetriedJobId(value: SabRetriedJobId): string | undefined {
+  return typeof value === 'string' ? value : value[1][0];
 }
 
 function isUsenetNotFoundError(error: unknown): error is UsenetNotFoundError {
@@ -166,7 +179,11 @@ export class Sabnzbd implements UsenetClient {
    * @returns The full status payload.
    */
   async getFullStatus(): Promise<SabFullStatus> {
-    return this.request<SabFullStatus>({ mode: 'fullstatus', skip_dashboard: '1' });
+    const response = await this.request<{ status: SabFullStatus }>({
+      mode: 'fullstatus',
+      skip_dashboard: '1',
+    });
+    return response.status;
   }
 
   /**
@@ -221,10 +238,13 @@ export class Sabnzbd implements UsenetClient {
    * Calls SABnzbd `mode=history`.
    *
    * @param query Optional history filters, pagination, and archive controls.
-   * @returns The raw history payload including `slots`.
+   * @returns The raw history payload including `slots`, or `false` when `lastHistoryUpdate`
+   * matches SAB's current `last_history_update` and nothing changed.
    */
-  async listHistory(query: SabHistoryQuery = {}): Promise<SabHistory> {
-    const response = await this.request<{ history: SabHistory }>({
+  async listHistory(query?: Omit<SabHistoryQuery, 'lastHistoryUpdate'>): Promise<SabHistory>;
+  async listHistory(query: SabHistoryQuery): Promise<SabHistory | false>;
+  async listHistory(query: SabHistoryQuery = {}): Promise<SabHistory | false> {
+    const response = await this.request<{ history: SabHistory | false }>({
       mode: 'history',
       start: toQueryStringValue(query.start),
       limit: toQueryStringValue(query.limit),
@@ -434,6 +454,114 @@ export class Sabnzbd implements UsenetClient {
   }
 
   /**
+   * Deletes a history job by its SAB `nzo_id`.
+   *
+   * Calls SABnzbd `mode=history` with `name=delete`. SAB archives the job by default instead of
+   * deleting it permanently, and `del_files` only removes the incomplete download folder of
+   * failed jobs.
+   *
+   * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py (`_api_history_delete`)
+   * @param id SAB history job identifier (`nzo_id`).
+   * @param deleteFiles When `true`, also remove leftover files of failed jobs; defaults to `false`.
+   * @param archive When `false`, permanently delete instead of archiving; defaults to SAB's setting.
+   * @returns `true` when SABnzbd accepts the delete command.
+   */
+  async deleteHistory(id: string, deleteFiles = false, archive?: boolean): Promise<boolean> {
+    return this.command({
+      mode: 'history',
+      name: 'delete',
+      value: id,
+      del_files: deleteFiles ? '1' : '0',
+      archive: archive === undefined ? undefined : toQueryStringValue(archive),
+    });
+  }
+
+  /**
+   * Removes all queue jobs, optionally only those whose name contains `search`. Downloaded
+   * files are deleted too.
+   *
+   * Calls SABnzbd `mode=queue` with `name=purge`.
+   *
+   * @param search Optional case-insensitive name filter.
+   * @returns The removed queue ids.
+   */
+  async purgeQueue(search?: string): Promise<string[]> {
+    const response = await this.request<SabRemoveResponse>(
+      { mode: 'queue', name: 'purge', search },
+      { allowFalseStatus: true },
+    );
+    return response.nzo_ids;
+  }
+
+  /**
+   * Sorts the queue. SAB keeps priority ordering, sorting only within each priority.
+   *
+   * Calls SABnzbd `mode=queue` with `name=sort`.
+   *
+   * @param sort Field to sort by.
+   * @param direction Sort direction; defaults to ascending.
+   * @returns `true` when SABnzbd accepts the sort command.
+   */
+  async sortQueue(sort: SabQueueSortField, direction: SabSortDirection = 'asc'): Promise<boolean> {
+    return this.command({ mode: 'queue', name: 'sort', sort, dir: direction });
+  }
+
+  /**
+   * Pauses the queue and resumes it automatically after `minutes`.
+   *
+   * Calls SABnzbd `mode=config` with `name=set_pause`.
+   *
+   * @param minutes Minutes to pause for.
+   * @returns `true` when SABnzbd accepts the timed pause.
+   */
+  async pauseQueueFor(minutes: number): Promise<boolean> {
+    return this.command({ mode: 'config', name: 'set_pause', value: `${minutes}` });
+  }
+
+  /**
+   * Re-queues a failed history job.
+   *
+   * Calls SABnzbd `mode=retry`.
+   *
+   * @param id SAB history job identifier (`nzo_id`).
+   * @param password Optional archive password for the retried job.
+   * @returns The new queue id. SAB removes the history entry.
+   */
+  async retryJob(id: string, password?: string): Promise<string> {
+    const response = await this.request<SabRetryResponse>({ mode: 'retry', value: id, password });
+    const newId = getRetriedJobId(response.nzo_id);
+    if (!newId) {
+      throw new Error('SABnzbd did not return a queue id');
+    }
+
+    return newId;
+  }
+
+  /**
+   * Re-queues every retryable failed history job.
+   *
+   * Calls SABnzbd `mode=retry_all`.
+   *
+   * @returns The new queue ids.
+   */
+  async retryAll(): Promise<string[]> {
+    const response = await this.request<SabRetryAllResponse>({ mode: 'retry_all' });
+    return response.status.flatMap(value => (value ? (getRetriedJobId(value) ?? []) : []));
+  }
+
+  /**
+   * Cancels post-processing of a job.
+   *
+   * Calls SABnzbd `mode=cancel_pp`.
+   *
+   * @param id SAB job identifier (`nzo_id`) currently in post-processing.
+   * @returns `true` when SABnzbd cancels post-processing.
+   */
+  async cancelPostProcessing(id: string): Promise<boolean> {
+    return this.command({ mode: 'cancel_pp', value: id });
+  }
+
+  /**
    * Moves a queue job to a target position.
    *
    * Calls SABnzbd `mode=switch`.
@@ -506,8 +634,11 @@ export class Sabnzbd implements UsenetClient {
   /**
    * Changes queue job post-processing options.
    *
-   * Calls SABnzbd `mode=change_opts`.
+   * Calls SABnzbd `mode=change_opts`. SAB only accepts explicit modes here, so
+   * `UsenetPostProcess.default` throws instead of being sent; there is no API to reset a job
+   * back to its category default.
    *
+   * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/api.py (`_api_change_opts`)
    * @param id SAB queue job identifier (`nzo_id`).
    * @param postProcess Normalized post-processing mode to apply.
    * @returns `true` when SABnzbd accepts the option change.
@@ -516,29 +647,35 @@ export class Sabnzbd implements UsenetClient {
     id: string,
     postProcess: NormalizedAddNzbOptions['postProcess'],
   ): Promise<boolean> {
+    const value = normalizeAddPostProcess(postProcess);
+    if (value === -1) {
+      throw new RangeError('SABnzbd cannot reset a queued job to the default post-process mode');
+    }
+
     return this.command({
       mode: 'change_opts',
       value: id,
-      value2: `${normalizeAddPostProcess(postProcess)}`,
+      value2: `${value}`,
     });
   }
 
   /**
    * Renames a queue job and optionally sets an archive password.
    *
-   * Calls SABnzbd `mode=rename`.
+   * Calls SABnzbd `mode=queue` with `name=rename`.
    *
    * @param id SAB queue job identifier (`nzo_id`).
    * @param name New queue job name.
-   * @param password Optional archive password; defaults to an empty string.
+   * @param password Optional archive password; left unchanged when omitted.
    * @returns `true` when SABnzbd accepts the rename command.
    */
-  async renameJob(id: string, name: string, password = ''): Promise<boolean> {
+  async renameJob(id: string, name: string, password?: string): Promise<boolean> {
     return this.command({
-      mode: 'rename',
+      mode: 'queue',
+      name: 'rename',
       value: id,
       value2: name,
-      password,
+      value3: password,
     });
   }
 
@@ -676,8 +813,28 @@ export class Sabnzbd implements UsenetClient {
     };
   }
 
+  /**
+   * Removes a job from the queue, falling back to history when the id is not queued.
+   */
   async removeJob(id: string, removeData = false): Promise<boolean> {
-    return this.deleteJob(id, removeData);
+    const response = await this.request<SabRemoveResponse>(
+      {
+        mode: 'queue',
+        name: 'delete',
+        value: id,
+        del_files: removeData ? '1' : '0',
+      },
+      { allowFalseStatus: true },
+    );
+    if (response.nzo_ids.includes(id)) {
+      return true;
+    }
+
+    if (!(await this.findHistoryJob(id))) {
+      throw new UsenetNotFoundError('sabnzbd', 'historyJob', id);
+    }
+
+    return this.deleteHistory(id, removeData);
   }
 
   async setCategory(id: string, category: string): Promise<boolean> {

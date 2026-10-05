@@ -135,6 +135,13 @@ Connection and discovery:
 Queue and job mutation:
 
 - `deleteJob(id, deleteFiles?)`
+- `deleteHistory(id, deleteFiles?, archive?)`
+- `purgeQueue(search?)`
+- `sortQueue(sort, direction?)`
+- `pauseQueueFor(minutes)`
+- `retryJob(id, password?)`
+- `retryAll()`
+- `cancelPostProcessing(id)`
 - `shutdown()`
 - `restart()`
 - `restartRepair()`

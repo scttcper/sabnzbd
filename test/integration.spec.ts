@@ -11,6 +11,7 @@ import type {
   SabFullStatus,
   SabHistory,
   SabQueue,
+  SabQueueSlot,
   SabServerStats,
   SabWarning,
 } from '../src/types.js';
@@ -84,6 +85,54 @@ function getAddedId(response: SabAddResponse): string {
   return id;
 }
 
+/**
+ * Failed jobs show up from the post-processing queue before they are written to the history
+ * database, and SAB can only retry them once they're in the database.
+ */
+async function waitForFailedHistoryJob(client: Sabnzbd, id: string, attempts = 40): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const history = await client.listHistory({ nzoIds: id });
+    if (history.slots.some(slot => slot.nzo_id === id && slot.retry)) {
+      return;
+    }
+
+    await sleep(250);
+  }
+
+  throw new Error(`History job ${id} did not become available`);
+}
+
+/**
+ * SAB fails a URL fetch straight to history on a 404. The URL points at SAB's own web server
+ * inside the container, so it works no matter how the container is networked.
+ */
+async function createFailedHistoryJob(client: Sabnzbd, name: string): Promise<string> {
+  const id = await client.addNzbUrl(`http://127.0.0.1:8080/${name}-${Date.now()}.nzb`, {
+    category: '*',
+    name,
+  });
+  await waitForFailedHistoryJob(client, id);
+  return id;
+}
+
+/**
+ * SAB re-adds a URL job when its fetch finishes after the placeholder was deleted, so let a
+ * reachable fetch finish before cleanup. Unreachable URLs keep retrying and stay `Grabbing`.
+ */
+async function deleteUrlJob(client: Sabnzbd, id: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const job = await client.findJob(id);
+    if (job?.source !== 'queue' || (job.job.raw as SabQueueSlot).status !== 'Grabbing') {
+      break;
+    }
+
+    await sleep(250);
+  }
+
+  await client.removeJob(id, true);
+  await waitForMissingJob(client, id);
+}
+
 async function createPausedJob(client: Sabnzbd, name: string): Promise<string> {
   return client.addNzbFile(sampleNzb, {
     category: '*',
@@ -143,7 +192,23 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     const fullStatus = await client.getFullStatus();
 
     expectTypeOf(fullStatus).toEqualTypeOf<SabFullStatus>();
-    expect(fullStatus).toEqual(expect.any(Object));
+    expect(fullStatus).toMatchObject({
+      version: expect.any(String),
+      completedir: expect.any(String),
+      downloaddir: expect.any(String),
+      servers: expect.any(Array),
+    });
+  });
+
+  it('loads normalized status from full status', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const { status } = await client.getAllData();
+
+    expect(status).toMatchObject({
+      isDownloadPaused: expect.any(Boolean),
+      speedLimitBytesPerSecond: expect.any(Number),
+      completeDir: expect.any(String),
+    });
   });
 
   it('loads warnings payload shape', async () => {
@@ -182,6 +247,22 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
 
     expectTypeOf(history).toEqualTypeOf<SabHistory>();
     expect(Array.isArray(history.slots)).toBe(true);
+    expect(history).toMatchObject({
+      noofslots: expect.any(Number),
+      last_history_update: expect.any(Number),
+    });
+  });
+
+  it('returns false for unchanged history', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const history = await client.listHistory({ limit: 1 });
+    const unchanged = await client.listHistory({
+      limit: 1,
+      lastHistoryUpdate: history.last_history_update,
+    });
+
+    expectTypeOf(unchanged).toEqualTypeOf<SabHistory | false>();
+    expect(unchanged).toBe(false);
   });
 
   it('loads categories payload shape', async () => {
@@ -231,7 +312,9 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     await expect(client.getQueueJob(id)).resolves.toMatchObject({
       id,
       name: expect.any(String),
-      category: expect.any(String),
+      category: '',
+      priority: UsenetPriority.normal,
+      dateAdded: expect.any(String),
       progress: expect.any(Number),
       isCompleted: expect.any(Boolean),
       stateMessage: expect.any(String),
@@ -386,6 +469,9 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
 
     const position = await client.changePriority(id, UsenetPriority.high);
     expect(['number', 'undefined']).toContain(typeof position);
+    await expect(client.getQueueJob(id)).resolves.toMatchObject({
+      priority: UsenetPriority.high,
+    });
   });
 
   it('changes post process on a queue job', async () => {
@@ -397,6 +483,8 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     });
 
     await expect(client.changePostProcess(id, UsenetPostProcess.repairUnpack)).resolves.toBe(true);
+    const [slot] = (await client.listQueue({ nzoIds: id })).slots;
+    expect(slot?.unpackopts).toBe('2');
   });
 
   it('pauses and resumes an individual queue job', async () => {
@@ -457,16 +545,149 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     await expect(client.setSpeedLimit(0)).resolves.toBe(true);
   });
 
-  it('rejects rename on current SAB image', async () => {
+  it('renames a queue job with a password', async () => {
     const client = new Sabnzbd({ baseUrl, apiKey });
-    const id = await createPausedJob(client, 'rename-failure');
+    const id = await createPausedJob(client, 'rename-job');
     addCleanup(async () => {
       await client.deleteJob(id, true);
       await waitForMissingJob(client, id);
     });
 
-    await expect(client.renameJob(id, 'typedoc.integration.rename')).rejects.toThrow(
-      /not implemented/i,
+    await expect(client.renameJob(id, 'renamed-job', 'secret')).resolves.toBe(true);
+    const [slot] = (await client.listQueue({ nzoIds: id })).slots;
+    expect(slot).toMatchObject({ filename: 'renamed-job', password: 'secret' });
+  });
+
+  it('sorts the queue by name', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const firstId = await createPausedJob(client, 'sort-queue-b');
+    const secondId = await createPausedJob(client, 'sort-queue-a');
+    addCleanup(async () => {
+      await client.deleteJob(firstId, true);
+      await client.deleteJob(secondId, true);
+      await waitForMissingJob(client, firstId);
+      await waitForMissingJob(client, secondId);
+    });
+
+    await expect(client.sortQueue('name', 'asc')).resolves.toBe(true);
+    let names = (await client.listQueue({ search: 'sort-queue-' })).slots.map(
+      slot => slot.filename,
+    );
+    expect(names).toEqual(['sort-queue-a', 'sort-queue-b']);
+
+    await expect(client.sortQueue('name', 'desc')).resolves.toBe(true);
+    names = (await client.listQueue({ search: 'sort-queue-' })).slots.map(slot => slot.filename);
+    expect(names).toEqual(['sort-queue-b', 'sort-queue-a']);
+  });
+
+  it('purges matching queue jobs', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const firstId = await createPausedJob(client, 'purge-queue-first');
+    const secondId = await createPausedJob(client, 'purge-queue-second');
+    const keptId = await createPausedJob(client, 'purge-kept');
+    addCleanup(async () => {
+      await client.deleteJob(keptId, true);
+      await waitForMissingJob(client, keptId);
+    });
+
+    const removed = await client.purgeQueue('purge-queue-');
+    expect(removed.toSorted()).toEqual([firstId, secondId].toSorted());
+    await waitForMissingJob(client, firstId);
+    await waitForMissingJob(client, secondId);
+    await expect(client.getQueueJob(keptId)).resolves.toMatchObject({ id: keptId });
+    await expect(client.purgeQueue('purge-queue-')).resolves.toEqual([]);
+  });
+
+  it('pauses the queue for a number of minutes', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    addCleanup(async () => {
+      await client.resumeQueue();
+    });
+
+    await expect(client.pauseQueueFor(5)).resolves.toBe(true);
+    const queue = await client.listQueue({ limit: 1 });
+    expect(queue.paused).toBe(true);
+    expect(queue.pause_int).not.toBe('0');
+  });
+
+  it('normalizes failed history jobs', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const id = await createFailedHistoryJob(client, 'failed-history');
+    addCleanup(async () => {
+      await client.deleteHistory(id, true, false);
+    });
+
+    await expect(client.getHistoryJob(id)).resolves.toMatchObject({
+      id,
+      category: '',
+      succeeded: false,
+      stateMessage: 'Failed',
+      failureMessage: expect.any(String),
+      dateAdded: expect.any(String),
+      dateCompleted: expect.any(String),
+    });
+  });
+
+  it('deletes a history job', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const id = await createFailedHistoryJob(client, 'delete-history');
+
+    await expect(client.deleteHistory(id, true, false)).resolves.toBe(true);
+    await expect(client.findJob(id)).resolves.toBeNull();
+  });
+
+  it('removes a history job via removeJob wrapper', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const id = await createFailedHistoryJob(client, 'remove-history');
+
+    await expect(client.removeJob(id, true)).resolves.toBe(true);
+    await expect(client.findJob(id)).resolves.toBeNull();
+  });
+
+  it('throws when removing a missing job', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+
+    await expect(client.removeJob('SABnzbd_nzo_missing_remove')).rejects.toMatchObject({
+      name: 'UsenetNotFoundError',
+    });
+  });
+
+  it('retries a failed history job', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const id = await createFailedHistoryJob(client, 'retry-job');
+
+    const newId = await client.retryJob(id);
+    addCleanup(async () => {
+      await waitForFailedHistoryJob(client, newId);
+      await client.deleteHistory(newId, true, false);
+    });
+
+    expect(newId).toEqual(expect.any(String));
+    expect(newId).not.toBe(id);
+    await expect(client.findJob(id)).resolves.toBeNull();
+  });
+
+  it('retries all failed history jobs', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+    const id = await createFailedHistoryJob(client, 'retry-all');
+
+    const newIds = await client.retryAll();
+    addCleanup(async () => {
+      for (const newId of newIds) {
+        await waitForFailedHistoryJob(client, newId);
+        await client.deleteHistory(newId, true, false);
+      }
+    });
+
+    expect(newIds.length).toBeGreaterThanOrEqual(1);
+    await expect(client.findJob(id)).resolves.toBeNull();
+  });
+
+  it('rejects cancel post-processing for a job not in post-processing', async () => {
+    const client = new Sabnzbd({ baseUrl, apiKey });
+
+    await expect(client.cancelPostProcessing('SABnzbd_nzo_missing_pp')).rejects.toThrow(
+      /item does not exist/i,
     );
   });
 
@@ -479,8 +700,7 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
     });
     const id = getAddedId(response);
     addCleanup(async () => {
-      await client.deleteJob(id, true);
-      await waitForMissingJob(client, id);
+      await deleteUrlJob(client, id);
     });
 
     expect(id).toEqual(expect.any(String));
@@ -494,8 +714,7 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
       name: 'normalized-url',
     });
     addCleanup(async () => {
-      await client.deleteJob(id, true);
-      await waitForMissingJob(client, id);
+      await deleteUrlJob(client, id);
     });
 
     expect(id).toEqual(expect.any(String));
@@ -508,8 +727,7 @@ describe.skipIf(!integrationEnabled)('sabnzbd integration', () => {
       { category: '*', startPaused: true },
     );
     addCleanup(async () => {
-      await client.deleteJob(job.id, true);
-      await waitForMissingJob(client, job.id);
+      await deleteUrlJob(client, job.id);
     });
 
     expect(job).toMatchObject({

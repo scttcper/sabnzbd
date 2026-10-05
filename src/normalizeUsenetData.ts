@@ -17,6 +17,13 @@ import type {
   SabRawStatus,
 } from './types.js';
 
+/**
+ * SAB reports `"*"` for the default category and `"None"` for unset category/script.
+ */
+function normalizeSabName(value: string | undefined): string | undefined {
+  return value && value !== '*' && value !== 'None' ? value : undefined;
+}
+
 const BYTES_PER_MEGABYTE = 1024 * 1024;
 
 function toNumber(value: number | string | undefined): number {
@@ -36,6 +43,12 @@ function parseSabDuration(value: string | undefined): number {
   const parts = value.split(':').map(part => Number.parseInt(part, 10));
   if (parts.some(part => Number.isNaN(part))) {
     return 0;
+  }
+
+  // SAB uses `[D:]HH:MM:SS`, see `format_time_left` in sabnzbd/misc.py
+  if (parts.length === 4) {
+    const [days = 0, hours = 0, minutes = 0, seconds = 0] = parts;
+    return days * 86_400 + hours * 3600 + minutes * 60 + seconds;
   }
 
   if (parts.length === 3) {
@@ -70,7 +83,35 @@ function normalizeIsoDate(value: unknown): string | undefined {
   return undefined;
 }
 
-export function sabPriorityToNormalized(priority: SabRawPriorityValue | undefined): UsenetPriority {
+/**
+ * Maps a SAB priority to the shared priority.
+ *
+ * Queue slots report priority names (`"High"`), with numeric values as a fallback.
+ *
+ * @see https://github.com/sabnzbd/sabnzbd/blob/develop/sabnzbd/constants.py (`INTERFACE_PRIORITIES`)
+ */
+export function sabPriorityToNormalized(
+  priority: SabQueueSlot['priority'] | SabRawPriorityValue | undefined,
+): UsenetPriority {
+  switch (priority) {
+    case 'Force':
+    case 'Repair': {
+      return UsenetPriority.force;
+    }
+    case 'High': {
+      return UsenetPriority.high;
+    }
+    case 'Normal': {
+      return UsenetPriority.normal;
+    }
+    case 'Low': {
+      return UsenetPriority.low;
+    }
+    default: {
+      break;
+    }
+  }
+
   const normalized = Number.parseInt(String(priority ?? UsenetPriority.default), 10);
 
   switch (normalized) {
@@ -92,7 +133,8 @@ export function sabPriorityToNormalized(priority: SabRawPriorityValue | undefine
     case 1: {
       return UsenetPriority.high;
     }
-    case 2: {
+    case 2:
+    case 3: {
       return UsenetPriority.force;
     }
     case -100: {
@@ -213,7 +255,7 @@ export function normalizeSabJob(slot: SabQueueSlot): NormalizedUsenetJob {
     name: slot.filename,
     progress,
     isCompleted: progress >= 100,
-    category: slot.cat || '',
+    category: normalizeSabName(slot.cat) ?? '',
     priority: sabPriorityToNormalized(slot.priority),
     state,
     stateMessage,
@@ -223,7 +265,8 @@ export function normalizeSabJob(slot: SabQueueSlot): NormalizedUsenetJob {
     totalSize,
     remainingSize,
     savePath: undefined,
-    postProcessScript: slot.script,
+    dateAdded: normalizeIsoDate(slot.time_added),
+    postProcessScript: normalizeSabName(slot.script),
     raw: slot,
   };
 }
@@ -232,13 +275,15 @@ export function normalizeSabHistoryItem(item: SabHistorySlot): NormalizedUsenetH
   const { state, stateMessage } = mapSabStatus(item.status, item.fail_message);
   const totalSize = toNumber(item.bytes);
   const succeeded = state === UsenetJobState.completed;
+  // `completed` is the current time for jobs still post-processing
+  const isFinished = item.status === 'Completed' || item.status === 'Failed';
 
   return {
     id: item.nzo_id,
     name: item.name || item.nzb_name || item.nzo_id,
     progress: succeeded ? 100 : 0,
     isCompleted: succeeded,
-    category: item.category || '',
+    category: normalizeSabName(item.category) ?? '',
     priority: undefined,
     state,
     stateMessage,
@@ -248,8 +293,9 @@ export function normalizeSabHistoryItem(item: SabHistorySlot): NormalizedUsenetH
     totalSize,
     remainingSize: 0,
     savePath: item.storage,
-    dateCompleted: normalizeIsoDate(item.completed),
-    postProcessScript: item.script,
+    dateAdded: normalizeIsoDate(item.time_added),
+    dateCompleted: isFinished ? normalizeIsoDate(item.completed) : undefined,
+    postProcessScript: normalizeSabName(item.script),
     failureMessage: item.fail_message,
     storagePath: item.storage,
     succeeded,
@@ -264,6 +310,7 @@ export function normalizeSabStatus(
   return {
     isDownloadPaused: Boolean(queue.paused),
     speedBytesPerSecond: Math.round(toNumber(queue.kbpersec) * 1024),
+    speedLimitBytesPerSecond: toNumber(queue.speedlimit_abs),
     totalRemainingSize: megabytesToBytes(queue.mbleft),
     completeDir: fullStatus.completedir,
     raw: {
